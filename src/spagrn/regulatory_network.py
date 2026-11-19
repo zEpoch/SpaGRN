@@ -731,7 +731,11 @@ class InferNetwork(Network):
                                      umi_counts_obs_key=umi_counts_obs_key,
                                      **kwargs)
                 print('[spg] Creating KNN graph...')
-                hs.create_knn_graph(weighted_graph=weighted_graph, n_neighbors=n_neighbors)
+                hs.create_knn_graph(
+                    weighted_graph=weighted_graph,
+                    n_neighbors=n_neighbors,
+                    approx_neighbors=False,
+                )
                 substep_elapsed = time.time() - substep_start
                 print(f'[spg] KNN graph created in {format_time(substep_elapsed)}')
                 

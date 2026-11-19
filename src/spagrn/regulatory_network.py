@@ -176,7 +176,7 @@ class InferNetwork(Network):
               somde_k=20,
               noweights=None,
               torch_device='cpu',
-              pair_batch_size=4096,
+              pair_batch_size=256,
               normalize: bool = False):
         print('----------------------------------------')
         # Record total pipeline start time
@@ -663,7 +663,7 @@ class InferNetwork(Network):
             fn: str = 'adj.csv',
             mode='moran',
             torch_device=True,
-            pair_batch_size=4096,
+            pair_batch_size=256,
             **kwargs) -> pd.DataFrame:
         """
         Inference of co-expression modules by spatial-proximity-graph (SPG) model.

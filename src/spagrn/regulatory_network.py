@@ -177,7 +177,16 @@ class InferNetwork(Network):
               noweights=None,
               torch_device='cpu',
               pair_batch_size=256,
-              normalize: bool = False):
+              normalize: bool = False,
+              cistarget_backend='cpu',
+              aucell_backend='cpu',
+              aucell_cell_batch_size=512,
+              aucell_seed=None):
+        for backend in (cistarget_backend, aucell_backend):
+            if backend not in ('cpu', 'gpu'):
+                raise ValueError("Enrichment backend must be 'cpu' or 'gpu'")
+        if 'gpu' in (cistarget_backend, aucell_backend) and not str(torch_device).startswith('cuda'):
+            raise ValueError("GPU enrichment requires torch_device='cuda:0' (or another CUDA device)")
         print('----------------------------------------')
         # Record total pipeline start time
         pipeline_start_time = time.time()
@@ -281,7 +290,9 @@ class InferNetwork(Network):
                                       rank_threshold=self.params["rank_threshold"],
                                       auc_threshold=self.params["prune_auc_threshold"],
                                       nes_threshold=self.params["nes_threshold"],
-                                      motif_similarity_fdr=self.params["motif_similarity_fdr"])
+                                      motif_similarity_fdr=self.params["motif_similarity_fdr"],
+                                      backend=cistarget_backend,
+                                      torch_device=torch_device)
         step_elapsed = time.time() - step_start_time
         print(f'Step 5: Regulons prediction completed in {format_time(step_elapsed)}')
 
@@ -296,7 +307,11 @@ class InferNetwork(Network):
                      cache=cache,
                      noweights=noweights,
                      normalize=normalize,
-                     fn=os.path.join(self.tmp_dir, 'auc_mtx.csv'))
+                     fn=os.path.join(self.tmp_dir, 'auc_mtx.csv'),
+                     seed=aucell_seed,
+                     backend=aucell_backend,
+                     torch_device=torch_device,
+                     cell_batch_size=aucell_cell_batch_size)
         step_elapsed = time.time() - step_start_time
         print(f'Step 6.0: Cellular enrichment calculation completed in {format_time(step_elapsed)}')
 
@@ -305,7 +320,9 @@ class InferNetwork(Network):
             step_start_time = time.time()
             print('Step 6.1: Calculating receptor AUCs...')
             self.get_filtered_receptors(niche_df, receptor_key=receptor_key)
-            receptor_auc_mtx = self.receptor_auc()
+            receptor_auc_mtx = self.receptor_auc(num_workers=num_workers,
+                backend=aucell_backend, torch_device=torch_device,
+                cell_batch_size=aucell_cell_batch_size, seed=aucell_seed)
             self.isr(receptor_auc_mtx)
             step_elapsed = time.time() - step_start_time
             print(f'Step 6.1: Receptor AUCs calculation completed in {format_time(step_elapsed)}')
@@ -903,6 +920,8 @@ class InferNetwork(Network):
                       cache: bool = False,
                       save_tmp: bool = False,
                       fn: str = 'motifs.csv',
+                      backend='cpu',
+                      torch_device='cuda:0',
                       **kwargs) -> Sequence[Regulon]:
         """
         First, calculate a list of enriched motifs and the corresponding target genes for all modules.
@@ -941,9 +960,15 @@ class InferNetwork(Network):
         # infer function
         # #1.
         substep_start = time.time()
-        with ProgressBar():
-            df = prune2df(dbs, modules, motif_anno_fn, num_workers=num_workers, **kwargs)  # rank_threshold
-            df.to_csv(fn)
+        if backend == 'gpu':
+            from .cistarget_gpu import prune2df_gpu
+            df = prune2df_gpu(dbs, modules, motif_anno_fn, torch_device=torch_device, **kwargs)
+        elif backend == 'cpu':
+            with ProgressBar():
+                df = prune2df(dbs, modules, motif_anno_fn, num_workers=num_workers, **kwargs)
+        else:
+            raise ValueError("backend must be 'cpu' or 'gpu'")
+        df.to_csv(fn)
         substep_elapsed = time.time() - substep_start
         print(f'Motif enrichment computed in {format_time(substep_elapsed)}')
         # this function actually did two things. 1. get df, 2. turn df into list of Regulons
@@ -975,7 +1000,10 @@ class InferNetwork(Network):
                 seed=None,
                 cache: bool = True,
                 save_tmp: bool = True,
-                fn='auc.csv') -> pd.DataFrame:
+                fn='auc.csv',
+                backend='cpu',
+                torch_device='cuda:0',
+                cell_batch_size=512) -> pd.DataFrame:
         """
         Calculate enrichment of gene signatures for cells/spots.
 
@@ -1006,13 +1034,16 @@ class InferNetwork(Network):
             num_workers = cpu_count()
 
         substep_start = time.time()
-        auc_mtx = aucell(matrix,
-                         regulons,
-                         auc_threshold=auc_threshold,
-                         num_workers=num_workers,
-                         noweights=noweights,
-                         normalize=normalize,
-                         seed=seed)
+        if backend == 'gpu':
+            from .aucell_gpu import aucell_gpu
+            auc_mtx = aucell_gpu(matrix, regulons, auc_threshold=auc_threshold,
+                noweights=noweights, normalize=normalize, seed=seed,
+                torch_device=torch_device, cell_batch_size=cell_batch_size)
+        elif backend == 'cpu':
+            auc_mtx = aucell(matrix, regulons, auc_threshold=auc_threshold,
+                num_workers=num_workers, noweights=noweights, normalize=normalize, seed=seed)
+        else:
+            raise ValueError("backend must be 'cpu' or 'gpu'")
         substep_elapsed = time.time() - substep_start
         print(f'AUCell calculation completed in {format_time(substep_elapsed)}')
 
@@ -1022,7 +1053,8 @@ class InferNetwork(Network):
             auc_mtx.to_csv(os.path.join(self.tmp_dir, 'auc_mtx.csv'))
         return auc_mtx
 
-    def receptor_auc(self, auc_threshold=None, p_range=0.01, num_workers=20) -> Optional[pd.DataFrame]:
+    def receptor_auc(self, auc_threshold=None, p_range=0.01, num_workers=20,
+                     backend='cpu', torch_device='cuda:0', cell_batch_size=512, seed=None) -> Optional[pd.DataFrame]:
         """
         Calculate AUC value for modules that detected receptor genes within
         :param auc_threshold:
@@ -1049,7 +1081,15 @@ class InferNetwork(Network):
             a_value = percentiles[p_range]
         else:
             a_value = auc_threshold
-        receptor_auc_mtx = aucell(ex_matrix, receptor_modules, auc_threshold=a_value, num_workers=num_workers)
+        if backend == 'gpu':
+            from .aucell_gpu import aucell_gpu
+            receptor_auc_mtx = aucell_gpu(ex_matrix, receptor_modules, auc_threshold=a_value,
+                torch_device=torch_device, cell_batch_size=cell_batch_size, seed=seed)
+        elif backend == 'cpu':
+            receptor_auc_mtx = aucell(ex_matrix, receptor_modules, auc_threshold=a_value,
+                num_workers=num_workers, seed=seed)
+        else:
+            raise ValueError("backend must be 'cpu' or 'gpu'")
         return receptor_auc_mtx
 
     def isr(self, receptor_auc_mtx) -> pd.DataFrame:

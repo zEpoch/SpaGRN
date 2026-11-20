@@ -100,3 +100,12 @@ To enhance clarity and prevent any potential confusion, we have organized this G
     └── regulons.json                    # example of regulons, TF: target genes.
 
 ```
+
+
+## GPU Geary optimization
+
+The bivariate Geary GPU path now reuses a sparse spatial transform across TF blocks.
+For the Python 3.8 / PyTorch 2.4.1 CUDA image, run `bash scripts/install_gpu.sh` from this checkout.
+See [GPU optimization and image installation](GPU_OPTIMIZATION.md) for numerical checks, batch sizing and cache notes.
+
+Optional GPU enrichment backends are available with `cistarget_backend="gpu"` and `aucell_backend="gpu"` plus `torch_device="cuda:0"`. See GPU_OPTIMIZATION.md for validation requirements and supported versions.

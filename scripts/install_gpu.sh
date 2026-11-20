@@ -12,6 +12,6 @@ python -m pip install -c constraints-gpu.txt -e .
 python -m pip install -c constraints-gpu.txt ipykernel
 python -m pip check
 python -c 'import torch; import spagrn; from spagrn.regulatory_network import InferNetwork; print("SpaGRN:", spagrn.__file__); print("PyTorch:", torch.__version__); print("CUDA:", torch.version.cuda); print("GPU available:", torch.cuda.is_available())'
-python -m unittest discover -s test -p 'test_geary_gpu.py' -v
+python -m unittest discover -s test -p 'test_*gpu*.py' -v
 python -m ipykernel install --name=spagrn-gpu --display-name "Python (spagrn-gpu)"
 python -m pip freeze > requirements-installed.txt

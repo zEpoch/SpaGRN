@@ -8,3 +8,4 @@ numba==0.58.1
 dask==2023.5.0
 distributed==2023.5.0
 torch==2.4.1
+ctxcore==0.2.0

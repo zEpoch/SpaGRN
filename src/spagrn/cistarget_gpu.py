@@ -110,7 +110,7 @@ def prune2df_gpu(rnkdbs, modules, motif_annotations_fname, torch_device='cuda:0'
 
     annotations = load_motif_annotations(motif_annotations_fname,
         motif_similarity_fdr=motif_similarity_fdr,
-        orthologuous_identity_threshold=orthologuous_identity_threshold)
+        orthologous_identity_threshold=orthologuous_identity_threshold)
     backend = RecoveryGPU(torch_device)
     original = module2features_auc1st_impl
     namespace = dict(original.__globals__, calc_aucs=backend.aucs, recovery=backend.recovery)
